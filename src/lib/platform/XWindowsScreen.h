@@ -16,11 +16,7 @@
 #include <set>
 #include <vector>
 
-#if X_DISPLAY_MISSING
-#error X11 is required to build deskflow
-#else
 #include <X11/Xlib.h>
-#endif
 
 class XWindowsClipboard;
 class XWindowsKeyState;
@@ -31,7 +27,7 @@ class XWindowsScreen : public PlatformScreen
 {
 public:
   XWindowsScreen(
-      const char *displayName, bool isPrimary, bool disableXInitThreads, int mouseScrollDelta, IEventQueue *events,
+      const char *displayName, bool isPrimary, int mouseScrollDelta, IEventQueue *events,
       deskflow::ClientScrollDirection m_clientScrollDirection = deskflow::ClientScrollDirection::SERVER
   );
   ~XWindowsScreen() override;
