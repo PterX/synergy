@@ -1,5 +1,6 @@
 /*
  * Deskflow -- mouse and keyboard sharing utility
+ * SPDX-FileCopyrightText: (C) 2025 Deskflow Developers
  * SPDX-FileCopyrightText: (C) 2012 - 2016 Symless Ltd.
  * SPDX-FileCopyrightText: (C) 2002 Chris Schoeneman
  * SPDX-License-Identifier: GPL-2.0-only WITH LicenseRef-OpenSSL-Exception
@@ -12,7 +13,6 @@
 #include "base/IEventQueue.h"
 #include "base/Log.h"
 #include "base/Stopwatch.h"
-#include "base/TMethodEventJob.h"
 #include "deskflow/App.h"
 #include "deskflow/ArgsBase.h"
 #include "deskflow/ClientApp.h"
@@ -26,14 +26,11 @@
 #include "platform/XWindowsScreenSaver.h"
 #include "platform/XWindowsUtil.h"
 
+#include <X11/X.h>
+#include <X11/Xutil.h>
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
-#if X_DISPLAY_MISSING
-#error X11 is required to build deskflow
-#else
-#include <X11/X.h>
-#include <X11/Xutil.h>
 #define XK_MISCELLANY
 #define XK_XKB_KEYS
 #include <X11/keysymdef.h>
@@ -64,7 +61,6 @@ extern "C"
 #ifdef HAVE_XI2
 #include <X11/extensions/XInput2.h>
 #endif
-#endif
 
 static int xi_opcode;
 
@@ -86,7 +82,7 @@ static int xi_opcode;
 XWindowsScreen *XWindowsScreen::s_screen = nullptr;
 
 XWindowsScreen::XWindowsScreen(
-    const char *displayName, bool isPrimary, bool disableXInitThreads, int mouseScrollDelta, IEventQueue *events,
+    const char *displayName, bool isPrimary, int mouseScrollDelta, IEventQueue *events,
     deskflow::ClientScrollDirection scrollDirection
 )
     : PlatformScreen(events, scrollDirection),
@@ -101,12 +97,8 @@ XWindowsScreen::XWindowsScreen(
     m_mouseScrollDelta = 120;
   s_screen = this;
 
-  if (!disableXInitThreads) {
-    // initializes Xlib support for concurrent threads.
-    if (XInitThreads() == 0)
-      throw std::runtime_error("XInitThreads() returned zero");
-  } else {
-    LOG((CLOG_DEBUG "skipping XInitThreads()"));
+  if (XInitThreads() == 0) {
+    throw std::runtime_error("XInitThreads() returned zero");
   }
 
   // set the X I/O error handler so we catch the display disconnecting
@@ -159,10 +151,9 @@ XWindowsScreen::XWindowsScreen(
   }
 
   // install event handlers
-  m_events->adoptHandler(
-      EventTypes::System, m_events->getSystemTarget(),
-      new TMethodEventJob<XWindowsScreen>(this, &XWindowsScreen::handleSystemEvent)
-  );
+  m_events->addHandler(EventTypes::System, m_events->getSystemTarget(), [this](const auto &e) {
+    handleSystemEvent(e);
+  });
 
   // install the platform event queue
   m_events->adoptBuffer(new XWindowsEventQueueBuffer(m_display, m_window, m_events));
@@ -838,7 +829,7 @@ Display *XWindowsScreen::openDisplay(const char *displayName)
 {
   // get the DISPLAY
   if (displayName == nullptr) {
-    displayName = getenv("DISPLAY");
+    displayName = std::getenv("DISPLAY");
     if (displayName == nullptr) {
       displayName = ":0.0";
     }
@@ -1119,7 +1110,7 @@ Bool XWindowsScreen::findKeyEvent(Display *, XEvent *xevent, XPointer arg)
              : False;
 }
 
-void XWindowsScreen::handleSystemEvent(const Event &event, void *)
+void XWindowsScreen::handleSystemEvent(const Event &event)
 {
   auto *xevent = static_cast<XEvent *>(event.getData());
   assert(xevent != nullptr);
@@ -1184,7 +1175,7 @@ void XWindowsScreen::handleSystemEvent(const Event &event, void *)
 
     // discard matching key releases for key presses that were
     // filtered and remove them from our filtered list.
-    else if (xevent->type == KeyRelease && m_filtered.count(xevent->xkey.keycode) > 0) {
+    else if (xevent->type == KeyRelease && m_filtered.contains(xevent->xkey.keycode)) {
       m_filtered.erase(xevent->xkey.keycode);
       return;
     }
@@ -1895,7 +1886,7 @@ bool XWindowsScreen::grabMouseAndKeyboard()
       assert(result != GrabNotViewable);
       if (result != GrabSuccess) {
         LOG((CLOG_DEBUG2 "waiting to grab keyboard"));
-        ARCH->sleep(0.05);
+        Arch::sleep(0.05);
         if (timer.getTime() >= s_timeout) {
           LOG((CLOG_DEBUG2 "grab keyboard timed out"));
           return false;
@@ -1912,7 +1903,7 @@ bool XWindowsScreen::grabMouseAndKeyboard()
       // back off to avoid grab deadlock
       XUngrabKeyboard(m_display, CurrentTime);
       LOG((CLOG_DEBUG2 "ungrabbed keyboard, waiting to grab pointer"));
-      ARCH->sleep(0.05);
+      Arch::sleep(0.05);
       if (timer.getTime() >= s_timeout) {
         LOG((CLOG_DEBUG2 "grab pointer timed out"));
         return false;
