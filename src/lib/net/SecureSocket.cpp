@@ -12,7 +12,6 @@
 #include "base/Log.h"
 #include "base/Path.h"
 #include "base/String.h"
-#include "base/TMethodEventJob.h"
 #include "common/Settings.h"
 #include "mt/Lock.h"
 #include "net/FingerprintDatabase.h"
@@ -46,8 +45,8 @@ enum
 
 struct Ssl
 {
-  SSL_CTX *m_context;
-  SSL *m_ssl;
+  SSL_CTX *m_context = nullptr;
+  SSL *m_ssl = nullptr;
 };
 
 static int verifyIgnoreCertCallback(X509_STORE_CTX *, void *)
@@ -87,11 +86,9 @@ void SecureSocket::close()
 
 void SecureSocket::connect(const NetworkAddress &addr)
 {
-  m_events->adoptHandler(
-      EventTypes::DataSocketConnected, getEventTarget(),
-      new TMethodEventJob<SecureSocket>(this, &SecureSocket::handleTCPConnected)
-  );
-
+  m_events->addHandler(EventTypes::DataSocketConnected, getEventTarget(), [this](const auto &e) {
+    handleTCPConnected(e);
+  });
   TCPSocket::connect(addr);
 }
 
@@ -230,7 +227,7 @@ TCPSocket::EJobResult SecureSocket::doWrite()
 
 int SecureSocket::secureRead(void *buffer, int size, int &read)
 {
-  std::lock_guard ssl_lock{ssl_mutex_};
+  std::scoped_lock ssl_lock{ssl_mutex_};
 
   if (m_ssl->m_ssl != nullptr) {
     LOG((CLOG_DEBUG2 "reading secure socket"));
@@ -257,7 +254,7 @@ int SecureSocket::secureRead(void *buffer, int size, int &read)
 
 int SecureSocket::secureWrite(const void *buffer, int size, int &wrote)
 {
-  std::lock_guard ssl_lock{ssl_mutex_};
+  std::scoped_lock ssl_lock{ssl_mutex_};
 
   if (m_ssl->m_ssl != nullptr) {
     LOG((CLOG_DEBUG2 "writing secure socket: %p", this));
@@ -290,18 +287,16 @@ bool SecureSocket::isSecureReady() const
 
 void SecureSocket::initSsl(bool server)
 {
-  std::lock_guard ssl_lock{ssl_mutex_};
+  std::scoped_lock ssl_lock{ssl_mutex_};
 
-  m_ssl = new Ssl();
-  m_ssl->m_context = nullptr;
-  m_ssl->m_ssl = nullptr;
+  m_ssl = std::make_unique<Ssl>();
 
   initContext(server);
 }
 
 bool SecureSocket::loadCertificates(const std::string &filename)
 {
-  std::lock_guard ssl_lock{ssl_mutex_};
+  std::scoped_lock ssl_lock{ssl_mutex_};
 
   if (filename.empty()) {
     SslLogger::logError("tls certificate is not specified");
@@ -392,7 +387,7 @@ void SecureSocket::createSSL()
 
 void SecureSocket::freeSSL()
 {
-  std::lock_guard ssl_lock{ssl_mutex_};
+  std::scoped_lock ssl_lock{ssl_mutex_};
 
   isFatal(true);
   // take socket from multiplexer ASAP otherwise the race condition
@@ -410,14 +405,13 @@ void SecureSocket::freeSSL()
       SSL_CTX_free(m_ssl->m_context);
       m_ssl->m_context = nullptr;
     }
-    delete m_ssl;
     m_ssl = nullptr;
   }
 }
 
 int SecureSocket::secureAccept(int socket)
 {
-  std::lock_guard ssl_lock{ssl_mutex_};
+  std::scoped_lock ssl_lock{ssl_mutex_};
 
   createSSL();
 
@@ -436,7 +430,7 @@ int SecureSocket::secureAccept(int socket)
     LOG((CLOG_ERR "failed to accept secure socket"));
     LOG((CLOG_WARN "client connection may not be secure"));
     m_secureReady = false;
-    ARCH->sleep(1);
+    Arch::sleep(1);
     retry = 0;
     return -1; // Failed, error out
   }
@@ -459,7 +453,7 @@ int SecureSocket::secureAccept(int socket)
   if (retry > 0) {
     LOG((CLOG_DEBUG2 "retry accepting secure socket"));
     m_secureReady = false;
-    ARCH->sleep(s_retryDelay);
+    Arch::sleep(s_retryDelay);
     return 0;
   }
 
@@ -479,7 +473,7 @@ int SecureSocket::secureConnect(int socket)
     return -1;
   }
 
-  std::lock_guard ssl_lock{ssl_mutex_};
+  std::scoped_lock ssl_lock{ssl_mutex_};
 
   createSSL();
 
@@ -507,7 +501,7 @@ int SecureSocket::secureConnect(int socket)
   if (retry > 0) {
     LOG((CLOG_DEBUG2 "retry connect secure socket"));
     m_secureReady = false;
-    ARCH->sleep(s_retryDelay);
+    Arch::sleep(s_retryDelay);
     return 0;
   }
 
@@ -642,6 +636,9 @@ bool SecureSocket::verifyCertFingerprint(const QString &FingerprintDatabasePath)
   const auto cert = SSL_get_peer_certificate(m_ssl->m_ssl);
   const auto sha256 = deskflow::sslCertFingerprint(cert, Fingerprint::Type::SHA256);
 
+  if (cert)
+    X509_free(cert);
+
   if (!sha256.isValid())
     return false;
 
@@ -728,7 +725,7 @@ ISocketMultiplexerJob *SecureSocket::serviceAccept(ISocketMultiplexerJob *job, b
   );
 }
 
-void SecureSocket::handleTCPConnected(const Event &, void *)
+void SecureSocket::handleTCPConnected(const Event &)
 {
   if (getSocket() == nullptr) {
     LOG((CLOG_DEBUG "disregarding stale connect event"));

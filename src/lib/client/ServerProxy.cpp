@@ -1,5 +1,6 @@
 /*
  * Deskflow -- mouse and keyboard sharing utility
+ * SPDX-FileCopyrightText: (C) 2025 Deskflow Developers
  * SPDX-FileCopyrightText: (C) 2012 - 2016 Symless Ltd.
  * SPDX-FileCopyrightText: (C) 2002 Chris Schoeneman
  * SPDX-License-Identifier: GPL-2.0-only WITH LicenseRef-OpenSSL-Exception
@@ -9,7 +10,6 @@
 
 #include "base/IEventQueue.h"
 #include "base/Log.h"
-#include "base/TMethodEventJob.h"
 #include "base/XBase.h"
 #include "client/Client.h"
 #include "deskflow/AppUtil.h"
@@ -44,15 +44,12 @@ ServerProxy::ServerProxy(Client *client, deskflow::IStream *stream, IEventQueue 
     m_modifierTranslationTable[id] = id;
 
   // handle data on stream
-  m_events->adoptHandler(
-      EventTypes::StreamInputReady, m_stream->getEventTarget(),
-      new TMethodEventJob<ServerProxy>(this, &ServerProxy::handleData)
-  );
-
-  m_events->adoptHandler(
-      EventTypes::ClipboardSending, this,
-      new TMethodEventJob<ServerProxy>(this, &ServerProxy::handleClipboardSendingEvent)
-  );
+  m_events->addHandler(EventTypes::StreamInputReady, m_stream->getEventTarget(), [this](const auto &) {
+    handleData();
+  });
+  m_events->addHandler(EventTypes::ClipboardSending, this, [this](const auto &e) {
+    ClipboardChunk::send(m_stream, e.getDataObject());
+  });
 
   // send heartbeat
   setKeepAliveRate(kKeepAliveRate);
@@ -73,10 +70,7 @@ void ServerProxy::resetKeepAliveAlarm()
   }
   if (m_keepAliveAlarm > 0.0) {
     m_keepAliveAlarmTimer = m_events->newOneShotTimer(m_keepAliveAlarm, nullptr);
-    m_events->adoptHandler(
-        EventTypes::Timer, m_keepAliveAlarmTimer,
-        new TMethodEventJob<ServerProxy>(this, &ServerProxy::handleKeepAliveAlarm)
-    );
+    m_events->addHandler(EventTypes::Timer, m_keepAliveAlarmTimer, [this](const auto &) { handleKeepAliveAlarm(); });
   }
 }
 
@@ -86,7 +80,7 @@ void ServerProxy::setKeepAliveRate(double rate)
   resetKeepAliveAlarm();
 }
 
-void ServerProxy::handleData(const Event &, void *)
+void ServerProxy::handleData()
 {
   // handle messages until there are no more.  first read message code.
   uint8_t code[4];
@@ -333,7 +327,7 @@ ServerProxy::EResult ServerProxy::parseMessage(const uint8_t *code)
   return kOkay;
 }
 
-void ServerProxy::handleKeepAliveAlarm(const Event &, void *)
+void ServerProxy::handleKeepAliveAlarm()
 {
   LOG((CLOG_NOTE "server is dead"));
   m_client->disconnect("server is not responding");
@@ -793,7 +787,7 @@ void ServerProxy::setOptions()
     }
 
     if (id != kKeyModifierIDNull) {
-      m_modifierTranslationTable[id] = static_cast<KeyModifierID>(options[i + 1]);
+      m_modifierTranslationTable[id] = options[i + 1];
       LOG((CLOG_DEBUG1 "modifier %d mapped to %d", id, m_modifierTranslationTable[id]));
     }
   }
@@ -811,11 +805,6 @@ void ServerProxy::infoAcknowledgment()
 {
   LOG((CLOG_DEBUG1 "recv info acknowledgment"));
   m_ignoreMouse = false;
-}
-
-void ServerProxy::handleClipboardSendingEvent(const Event &event, void *)
-{
-  ClipboardChunk::send(m_stream, event.getDataObject());
 }
 
 void ServerProxy::secureInputNotification()

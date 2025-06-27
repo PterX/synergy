@@ -33,7 +33,6 @@ add_library(base STATIC
   Stopwatch.h
   String.cpp
   String.h
-  TMethodEventJob.h
   TMethodJob.h
   Unicode.cpp
   Unicode.h
@@ -41,3 +40,4 @@ add_library(base STATIC
   XBase.h
 )
 
+target_link_libraries(base PRIVATE arch)
