@@ -1,5 +1,6 @@
 /*
  * Deskflow -- mouse and keyboard sharing utility
+ * SPDX-FileCopyrightText: (C) 2025 Deskflow Developers
  * SPDX-FileCopyrightText: (C) 2012 - 2016 Symless Ltd.
  * SPDX-FileCopyrightText: (C) 2002 Chris Schoeneman
  * SPDX-License-Identifier: GPL-2.0-only WITH LicenseRef-OpenSSL-Exception
@@ -8,7 +9,6 @@
 #pragma once
 
 #include "base/Event.h"
-#include "base/Stopwatch.h"
 #include "deskflow/ClipboardTypes.h"
 #include "deskflow/KeyTypes.h"
 #include "deskflow/languages/LanguageManager.h"
@@ -75,8 +75,8 @@ private:
   KeyModifierMask translateModifierMask(KeyModifierMask) const;
 
   // event handlers
-  void handleData(const Event &, void *);
-  void handleKeepAliveAlarm(const Event &, void *);
+  void handleData();
+  void handleKeepAliveAlarm();
 
   // message handlers
   void enter();
@@ -96,7 +96,6 @@ private:
   void setOptions();
   void queryInfo();
   void infoAcknowledgment();
-  void handleClipboardSendingEvent(const Event &, void *);
   void secureInputNotification();
   void setServerLanguages();
   void setActiveServerLanguage(const std::string &language);

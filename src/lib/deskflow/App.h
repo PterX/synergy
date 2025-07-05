@@ -11,6 +11,7 @@
 #include "base/Log.h"
 #include "common/Common.h"
 #include "deskflow/IApp.h"
+#include "net/SocketMultiplexer.h"
 
 #if SYSAPI_WIN32
 #include "deskflow/win32/AppUtilWindows.h"
@@ -18,6 +19,7 @@
 #include "deskflow/unix/AppUtilUnix.h"
 #endif
 
+#include <memory>
 #include <stdexcept>
 
 namespace deskflow {
@@ -91,14 +93,14 @@ public:
   {
     m_events = &events;
   }
-  void setSocketMultiplexer(SocketMultiplexer *sm)
+  void setSocketMultiplexer(std::unique_ptr<SocketMultiplexer> &&sm)
   {
-    m_socketMultiplexer = sm;
+    m_socketMultiplexer = std::move(sm);
   }
 
   SocketMultiplexer *getSocketMultiplexer() const
   {
-    return m_socketMultiplexer;
+    return m_socketMultiplexer.get();
   }
 
   static App &instance()
@@ -120,7 +122,7 @@ private:
   static App *s_instance;
   FileLogOutputter *m_fileLog = nullptr;
   ARCH_APP_UTIL m_appUtil;
-  SocketMultiplexer *m_socketMultiplexer = nullptr;
+  std::unique_ptr<SocketMultiplexer> m_socketMultiplexer;
 };
 
 #if WINAPI_MSWINDOWS
@@ -143,8 +145,6 @@ private:
   "  -l  --log <file>         write log messages to file.\n"                                                           \
   "      --enable-crypto      enable TLS encryption.\n"                                                                \
   "      --tls-cert           specify the path to the TLS certificate file.\n"
-
-#define DRAG_AND_DROP "      --enable-drag-drop   enable file drag & drop.\n"
 
 #define HELP_COMMON_INFO_2                                                                                             \
   "  -h, --help               display this help and exit.\n"                                                           \

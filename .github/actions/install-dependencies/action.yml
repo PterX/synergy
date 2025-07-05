@@ -13,8 +13,8 @@ inputs:
     description: "The version of Qt to install (Windows & macOS)"
     required: false
 
-  qt-install-dir:
-    description: "The path to install Qt into (Windows & macOS)"
+  vcpkg-triplet:
+    description: "vcpkg triplet to use (Windows)"
     required: false
 
 outputs:
@@ -57,7 +57,7 @@ runs:
             elif [ ${{ inputs.like }} == "arch" ]; then
               pacman -Syu --noconfirm base-devel cmake ninja \
                 gcc openssl glib2 libxtst libxkbfile gtest libei libportal \
-                qt6-base qt6-tools qt6-svg gtk3 tomlplusplus cli11 help2man
+                qt6-base qt6-tools qt6-svg gtk3 tomlplusplus cli11 help2man doxygen graphviz rsync
             else
               echo "Unknown like"
             fi
@@ -72,7 +72,6 @@ runs:
       env:
         AQT_CONFIG: ${{ github.workspace }}/.github/actions/install-dependencies/aqt.ini
       with:
-        dir: ${{inputs.qt-install-dir}}
         version: ${{inputs.qt-version}}
         cache: true
         cache-key-prefix: ${{matrix.target.os}}-${{inputs.qt-version}}
@@ -80,11 +79,11 @@ runs:
     - name: Build and cache vcpkg
       if: ${{ runner.os == 'Windows' }}
       id: vcpkg
-      uses: sithlord48/vcpkg-action@v7
+      uses: johnwason/vcpkg-action@v7
       with:
         pkgs: gtest openssl
-        extra-args: --classic
-        triplet: x64-windows-release
+        extra-args: --classic --host-triplet=${{inputs.vcpkg-triplet}}
+        triplet: ${{inputs.vcpkg-triplet}}
         token: ${{ github.token }}
 
     - name: Install Wix

@@ -1,5 +1,6 @@
 /*
  * Deskflow -- mouse and keyboard sharing utility
+ * SPDX-FileCopyrightText: (C) 2025 Deskflow Developers
  * SPDX-FileCopyrightText: (C) 2012 - 2016 Symless Ltd.
  * SPDX-FileCopyrightText: (C) 2002 Chris Schoeneman
  * SPDX-License-Identifier: GPL-2.0-only WITH LicenseRef-OpenSSL-Exception
@@ -16,11 +17,7 @@
 #include <set>
 #include <vector>
 
-#if X_DISPLAY_MISSING
-#error X11 is required to build deskflow
-#else
 #include <X11/Xlib.h>
-#endif
 
 class XWindowsClipboard;
 class XWindowsKeyState;
@@ -31,7 +28,7 @@ class XWindowsScreen : public PlatformScreen
 {
 public:
   XWindowsScreen(
-      const char *displayName, bool isPrimary, bool disableXInitThreads, int mouseScrollDelta, IEventQueue *events,
+      const char *displayName, bool isPrimary, int mouseScrollDelta, IEventQueue *events,
       deskflow::ClientScrollDirection m_clientScrollDirection = deskflow::ClientScrollDirection::SERVER
   );
   ~XWindowsScreen() override;
@@ -83,7 +80,7 @@ public:
 
 protected:
   // IPlatformScreen overrides
-  void handleSystemEvent(const Event &, void *) override;
+  void handleSystemEvent(const Event &event) override;
   void updateButtons() override;
   IKeyState *getKeyState() const override;
 
@@ -109,7 +106,6 @@ private:
   void onError();
   static int ioErrorHandler(Display *);
 
-private:
   class KeyEventFilter
   {
   public:
