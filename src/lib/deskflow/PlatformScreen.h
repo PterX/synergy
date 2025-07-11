@@ -22,7 +22,7 @@ class PlatformScreen : public IPlatformScreen
 {
 public:
   PlatformScreen(
-      IEventQueue *events, deskflow::ClientScrollDirection scrollDirection = deskflow::ClientScrollDirection::SERVER
+      IEventQueue *events, deskflow::ClientScrollDirection scrollDirection = deskflow::ClientScrollDirection::Normal
   );
   ~PlatformScreen() override = default;
 
@@ -96,7 +96,7 @@ protected:
   virtual IKeyState *getKeyState() const = 0;
 
   // IPlatformScreen overrides
-  void handleSystemEvent(const Event &event, void *) override = 0;
+  void handleSystemEvent(const Event &event) override = 0;
 
   /*!
    * \brief mapClientScrollDirection
@@ -111,5 +111,5 @@ private:
    * This member contains client scroll direction.
    * This member is used only on client side.
    */
-  deskflow::ClientScrollDirection m_clientScrollDirection = deskflow::ClientScrollDirection::SERVER;
+  deskflow::ClientScrollDirection m_clientScrollDirection = deskflow::ClientScrollDirection::Normal;
 };

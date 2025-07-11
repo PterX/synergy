@@ -87,7 +87,7 @@ bool ArgParser::parseClientArgs(deskflow::ClientArgs &args, int argc, const char
     } else if (isArg(i, argc, argv, nullptr, "--sync-language")) {
       args.m_enableLangSync = true;
     } else if (isArg(i, argc, argv, nullptr, "--invert-scroll")) {
-      args.m_clientScrollDirection = deskflow::ClientScrollDirection::INVERT_SERVER;
+      args.m_clientScrollDirection = deskflow::ClientScrollDirection::Inverted;
     } else if (isArg(i, argc, argv, nullptr, "client")) {
       ++i;
       continue;
@@ -128,10 +128,6 @@ bool ArgParser::parsePlatformArgs(
   if (isArg(i, argc, argv, "-display", "--display", 1)) {
     // use alternative display
     argsBase.m_display = argv[++i];
-  }
-
-  else if (isArg(i, argc, argv, nullptr, "--no-xinitthreads")) {
-    argsBase.m_disableXInitThreads = true;
   }
 
   else {

@@ -32,7 +32,6 @@
 #include "Config.h"
 #endif
 
-#include <QApplication>
 #include <QDesktopServices>
 #include <QFileDialog>
 #include <QLocalServer>
@@ -81,14 +80,9 @@ MainWindow::MainWindow()
       m_actionRestore{new QAction(tr("&Open Deskflow"), this)},
       m_actionSettings{new QAction(tr("&Preferences"), this)},
       m_actionStartCore{new QAction(tr("&Start"), this)},
+      m_actionRestartCore{new QAction(tr("Rest&art"), this)},
       m_actionStopCore{new QAction(tr("S&top"), this)}
 {
-  const auto themeName = QStringLiteral("deskflow-%1").arg(iconMode());
-  if (QIcon::themeName().isEmpty())
-    QIcon::setThemeName(themeName);
-  else
-    QIcon::setFallbackThemeName(themeName);
-
   ui->setupUi(this);
 
   // Setup Actions
@@ -115,6 +109,10 @@ MainWindow::MainWindow()
 
   m_actionStartCore->setShortcut(QKeySequence(tr("Ctrl+S")));
   m_actionStartCore->setIcon(QIcon::fromTheme(QStringLiteral("system-run")));
+
+  m_actionRestartCore->setVisible(false);
+  m_actionRestartCore->setShortcut(QKeySequence(tr("Ctrl+S")));
+  m_actionRestartCore->setIcon(QIcon::fromTheme(QStringLiteral("view-refresh")));
 
   m_actionStopCore->setShortcut(QKeySequence(tr("Ctrl+T")));
   m_actionStopCore->setIcon(QIcon::fromTheme(QIcon::ThemeIcon::ProcessStop));
@@ -146,6 +144,13 @@ MainWindow::MainWindow()
 
   // Force generation of SHA256 for the localhost
   if (Settings::value(Settings::Security::TlsEnabled).toBool()) {
+    if (Settings::value(Settings::Security::KeySize).toInt() < 2048) {
+      QMessageBox::information(
+          this, kAppName,
+          tr("Your current TLS key is smaller than the minimum allowed size, A new key 2048-bit key will be generated.")
+      );
+      regenerateLocalFingerprints();
+    }
     if (!QFile::exists(Settings::tlsLocalDb())) {
       regenerateLocalFingerprints();
       return;
@@ -234,10 +239,11 @@ void MainWindow::setupControls()
   ui->lineEditName->setVisible(false);
 
 #if defined(Q_OS_MAC)
-
   ui->rbModeServer->setAttribute(Qt::WA_MacShowFocusRect, 0);
   ui->rbModeClient->setAttribute(Qt::WA_MacShowFocusRect, 0);
-
+  ui->btnSaveServerConfig->setFixedWidth(ui->btnSaveServerConfig->height());
+#else
+  ui->btnSaveServerConfig->setIconSize(QSize(22, 22));
 #endif
 
   const auto trayItemSize = QSize(24, 24);
@@ -304,6 +310,7 @@ void MainWindow::connectSlots()
   connect(m_actionRestore, &QAction::triggered, this, &MainWindow::showAndActivate);
   connect(m_actionSettings, &QAction::triggered, this, &MainWindow::openSettings);
   connect(m_actionStartCore, &QAction::triggered, this, &MainWindow::startCore);
+  connect(m_actionRestartCore, &QAction::triggered, this, &MainWindow::resetCore);
   connect(m_actionStopCore, &QAction::triggered, this, &MainWindow::stopCore);
 
   connect(&m_versionChecker, &VersionChecker::updateFound, this, &MainWindow::versionCheckerUpdateFound);
@@ -314,12 +321,13 @@ void MainWindow::connectSlots()
 #endif
 
   connect(&m_serverConnection, &ServerConnection::configureClient, this, &MainWindow::serverConnectionConfigureClient);
+  connect(&m_serverConnection, &ServerConnection::clientsChanged, this, &MainWindow::serverClientsChanged);
 
   connect(&m_serverConnection, &ServerConnection::messageShowing, this, &MainWindow::showAndActivate);
   connect(&m_clientConnection, &ClientConnection::messageShowing, this, &MainWindow::showAndActivate);
 
   connect(ui->btnToggleCore, &QPushButton::clicked, m_actionStartCore, &QAction::trigger, Qt::UniqueConnection);
-  connect(ui->btnApplySettings, &QPushButton::clicked, this, &MainWindow::resetCore);
+  connect(ui->btnRestartCore, &QPushButton::clicked, this, &MainWindow::resetCore);
   connect(ui->btnConnect, &QPushButton::clicked, this, &MainWindow::resetCore);
 
   connect(ui->lineHostname, &QLineEdit::returnPressed, ui->btnConnect, &QPushButton::click);
@@ -417,12 +425,16 @@ void MainWindow::startCore()
 {
   m_clientConnection.setShowMessage();
   m_coreProcess.start();
+  m_actionStartCore->setVisible(false);
+  m_actionRestartCore->setVisible(true);
 }
 
 void MainWindow::stopCore()
 {
   qDebug() << "stopping core process";
   m_coreProcess.stop();
+  m_actionStartCore->setVisible(true);
+  m_actionRestartCore->setVisible(false);
 }
 
 void MainWindow::clearSettings()
@@ -624,7 +636,7 @@ void MainWindow::open()
   if (Settings::value(Settings::Core::StartedBefore).toBool()) {
     if (ui->rbModeClient->isChecked() && ui->lineHostname->text().isEmpty())
       return;
-    m_coreProcess.start();
+    startCore();
   }
 }
 
@@ -645,6 +657,7 @@ void MainWindow::createMenuBar()
 {
   auto menuFile = new QMenu(tr("&File"), this);
   menuFile->addAction(m_actionStartCore);
+  menuFile->addAction(m_actionRestartCore);
   menuFile->addAction(m_actionStopCore);
   menuFile->addSeparator();
   menuFile->addAction(m_actionQuit);
@@ -669,7 +682,9 @@ void MainWindow::createMenuBar()
 void MainWindow::setupTrayIcon()
 {
   auto trayMenu = new QMenu(this);
-  trayMenu->addActions({m_actionStartCore, m_actionStopCore, m_actionMinimize, m_actionRestore, m_actionTrayQuit});
+  trayMenu->addActions(
+      {m_actionStartCore, m_actionRestartCore, m_actionStopCore, m_actionMinimize, m_actionRestore, m_actionTrayQuit}
+  );
   trayMenu->insertSeparator(m_actionMinimize);
   trayMenu->insertSeparator(m_actionTrayQuit);
   m_trayIcon->setContextMenu(trayMenu);
@@ -708,7 +723,6 @@ void MainWindow::setIcon()
 {
   // Using a theme icon that is packed in exe renders an invisible icon
   // Instead use the resource path of the packed icon
-  // TODO Report to Qt ref the bug here
   const bool symbolicIcon = Settings::value(Settings::Gui::SymbolicTrayIcon).toBool();
 #ifndef Q_OS_MAC
   QString iconString = QStringLiteral(":/icons/deskflow-%1/apps/64/deskflow").arg(iconMode());
@@ -835,7 +849,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
   }
 
   if (m_saveOnExit) {
-    Settings::setValue(Settings::Gui::WindowGeometry, frameGeometry());
+    Settings::setValue(Settings::Gui::WindowGeometry, geometry());
   }
   qDebug() << "quitting application";
   event->accept();
@@ -860,6 +874,7 @@ void MainWindow::updateStatus()
 {
   const auto connection = m_coreProcess.connectionState();
   const auto process = m_coreProcess.processState();
+  const bool isServer = (m_coreProcess.mode() == CoreMode::Server);
 
   updateSecurityIcon(false);
   switch (process) {
@@ -886,7 +901,7 @@ void MainWindow::updateStatus()
       using enum CoreConnectionState;
 
     case Listening: {
-      if (m_coreProcess.mode() == CoreMode::Server) {
+      if (isServer) {
         updateSecurityIcon(true);
         setStatus(tr("%1 is waiting for clients").arg(kAppName));
       }
@@ -900,7 +915,10 @@ void MainWindow::updateStatus()
 
     case Connected: {
       updateSecurityIcon(true);
-      setStatus(tr("%1 is connected").arg(kAppName));
+      if (!isServer) {
+        setStatus(tr("%1 is connected as client of %2")
+                      .arg(kAppName, Settings::value(Settings::Client::RemoteHost).toString()));
+      }
       break;
     }
 
@@ -932,9 +950,9 @@ void MainWindow::coreProcessStateChanged(CoreProcessState state)
     ui->btnToggleCore->setText(tr("&Stop"));
     ui->btnToggleCore->setIcon(QIcon::fromTheme(QIcon::ThemeIcon::ProcessStop));
 
-    ui->btnApplySettings->setEnabled(true);
-
-    m_actionStartCore->setEnabled(false);
+    ui->btnRestartCore->setEnabled(true);
+    m_actionStartCore->setVisible(false);
+    m_actionRestartCore->setVisible(true);
     m_actionStopCore->setEnabled(true);
 
   } else {
@@ -944,9 +962,9 @@ void MainWindow::coreProcessStateChanged(CoreProcessState state)
     ui->btnToggleCore->setText(tr("&Start"));
     ui->btnToggleCore->setIcon(QIcon::fromTheme(QStringLiteral("system-run")));
 
-    ui->btnApplySettings->setEnabled(false);
-
-    m_actionStartCore->setEnabled(true);
+    ui->btnRestartCore->setEnabled(false);
+    m_actionStartCore->setVisible(true);
+    m_actionRestartCore->setVisible(false);
     m_actionStopCore->setEnabled(false);
   }
 }
@@ -1008,7 +1026,7 @@ void MainWindow::autoAddScreen(const QString &name)
   if (name.isEmpty())
     return;
 
-  if (m_serverConfig.autoAddScreen(name) == kAutoAddScreenManualClient) {
+  if (m_serverConfig.autoAddScreen(name) == AutoAddScreenManualClient) {
     showConfigureServer(
         tr("Please add the client (%1) to the grid.").arg(Settings::value(Settings::Core::ScreenName).toString())
     );
@@ -1126,6 +1144,37 @@ bool MainWindow::regenerateLocalFingerprints()
   return true;
 }
 
+void MainWindow::serverClientsChanged(const QStringList &clients)
+{
+  if (m_coreProcess.mode() != CoreMode::Server || !m_coreProcess.isStarted())
+    return;
+
+  switch (clients.size()) {
+  case 0:
+    setStatus(tr("%1 is waiting for clients").arg(kAppName));
+    ui->statusBar->setToolTip("");
+    break;
+
+  case 1:
+    setStatus(tr("%1 is connected to a client: %2").arg(kAppName, clients.first()));
+    ui->statusBar->setToolTip("");
+    break;
+
+  case 2:
+  case 3:
+  case 4:
+    setStatus(
+        tr("%1 is connected, with %2 clients: %3").arg(kAppName, QString::number(clients.size()), clients.join(", "))
+    );
+    ui->statusBar->setToolTip(tr("Clients:\n %1").arg(clients.join("\n")));
+    break;
+  default:
+    setStatus(tr("%1 is connected, with %n client(s)", "", clients.size()).arg(kAppName));
+    ui->statusBar->setToolTip(tr("Clients:\n  %1").arg(clients.join("\n")));
+    break;
+  }
+}
+
 void MainWindow::daemonIpcClientConnectionFailed()
 {
   if (deskflow::gui::messages::showDaemonOffline(this)) {
@@ -1137,7 +1186,7 @@ void MainWindow::toggleCanRunCore(bool enableButtons)
 {
   ui->btnToggleCore->setEnabled(enableButtons);
   ui->btnConnect->setEnabled(enableButtons);
-  ui->btnApplySettings->setEnabled(enableButtons);
+  ui->btnRestartCore->setEnabled(enableButtons && m_coreProcess.isStarted());
   m_actionStartCore->setEnabled(enableButtons);
   m_actionStopCore->setEnabled(enableButtons);
 }
